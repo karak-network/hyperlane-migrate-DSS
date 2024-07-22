@@ -1,34 +1,29 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.12;
 
-import {ECDSAStakeRegistryStorage, Quorum, StrategyParams} from "./ECDSAStakeRegistryStorage.sol";
-import {IStrategy} from "../interfaces/avs/vendored/IStrategy.sol";
-import {IDelegationManager} from "../interfaces/avs/vendored/IDelegationManager.sol";
-import {ISignatureUtils} from "../interfaces/avs/vendored/ISignatureUtils.sol";
-import {IServiceManager} from "../interfaces/avs/vendored/IServiceManager.sol";
+import {ECDSAStakeRegistryStorage, Quorum, AssetParams} from "./ECDSAStakeRegistryStorage.sol";
+import {IKarakBaseVault} from "../interfaces/avs/vendored/IKarakBaseVault.sol";
+import {ICore} from "../interfaces/avs/vendored/ICore.sol";
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {CheckpointsUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/CheckpointsUpgradeable.sol";
-import {SignatureCheckerUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/SignatureCheckerUpgradeable.sol";
+import {SignatureCheckerUpgradeable} from
+    "@openzeppelin/contracts-upgradeable/utils/cryptography/SignatureCheckerUpgradeable.sol";
 import {IERC1271Upgradeable} from "@openzeppelin/contracts-upgradeable/interfaces/IERC1271Upgradeable.sol";
+import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 
 /// @title ECDSA Stake Registry
 /// @author Layr Labs, Inc.
 /// @dev THIS CONTRACT IS NOT AUDITED
-/// @notice Manages operator registration and quorum updates for an AVS using ECDSA signatures.
-contract ECDSAStakeRegistry is
-    IERC1271Upgradeable,
-    OwnableUpgradeable,
-    ECDSAStakeRegistryStorage
-{
+/// @notice registers and updates the stake of an operator.
+contract ECDSAStakeRegistry is IERC1271Upgradeable, OwnableUpgradeable, ECDSAStakeRegistryStorage {
     using SignatureCheckerUpgradeable for address;
     using CheckpointsUpgradeable for CheckpointsUpgradeable.History;
+    using EnumerableMap for EnumerableMap.AddressToUintMap;
 
     /// @dev Constructor to create ECDSAStakeRegistry.
-    /// @param _delegationManager Address of the DelegationManager contract that this registry interacts with.
-    constructor(
-        IDelegationManager _delegationManager
-    ) ECDSAStakeRegistryStorage(_delegationManager) {
+    /// @param _core Address of the Core contract that this registry interacts with.
+    constructor(ICore _core) ECDSAStakeRegistryStorage(_core) {
         // _disableInitializers();
     }
 
@@ -36,27 +31,23 @@ contract ECDSAStakeRegistry is
     /// @param _serviceManager The address of the service manager.
     /// @param _thresholdWeight The threshold weight in basis points.
     /// @param _quorum The quorum struct containing the details of the quorum thresholds.
-    function initialize(
-        address _serviceManager,
-        uint256 _thresholdWeight,
-        Quorum memory _quorum
-    ) external initializer {
+    function initialize(address _serviceManager, uint256 _thresholdWeight, Quorum memory _quorum)
+        external
+        initializer
+    {
         __ECDSAStakeRegistry_init(_serviceManager, _thresholdWeight, _quorum);
     }
 
     /// @notice Registers a new operator using a provided signature and signing key
-    /// @param _operatorSignature Contains the operator's signature, salt, and expiry
-    /// @param _signingKey The signing key to add to the operator's history
-    function registerOperatorWithSignature(
-        ISignatureUtils.SignatureWithSaltAndExpiry memory _operatorSignature,
-        address _signingKey
-    ) external {
-        _registerOperatorWithSig(msg.sender, _operatorSignature, _signingKey);
+    /// @param data Contains the address of the siging key for operator
+    function registerOperator(address operator, bytes memory data) external onlyServiceManager {
+        address signingKey = abi.decode(data, (address));
+        _registerOperator(operator, signingKey);
     }
 
     /// @notice Deregisters an existing operator
-    function deregisterOperator() external {
-        _deregisterOperator(msg.sender);
+    function unregisterOperator(address operator, bytes memory) external onlyServiceManager {
+        _unregisterOperator(operator);
     }
 
     /**
@@ -73,7 +64,7 @@ contract ECDSAStakeRegistry is
 
     /**
      * @notice Updates the StakeRegistry's view of one or more operators' stakes adding a new entry in their history of stake checkpoints,
-     * @dev Queries stakes from the Eigenlayer core DelegationManager contract
+     * @dev Queries stakes from the `Core` contract
      * @param _operators A list of operator addresses to update
      */
     function updateOperators(address[] memory _operators) external {
@@ -84,7 +75,7 @@ contract ECDSAStakeRegistry is
      * @notice Updates the quorum configuration and the set of operators
      * @dev Only callable by the contract owner.
      * It first updates the quorum configuration and then updates the list of operators.
-     * @param _quorum The new quorum configuration, including strategies and their new weights
+     * @param _quorum The new quorum configuration, including assets and their new weights
      * @param _operators The list of operator addresses to update stakes for
      */
     function updateQuorumConfig(
@@ -136,9 +127,15 @@ contract ECDSAStakeRegistry is
     }
 
     /// @notice Retrieves the current stake quorum details.
-    /// @return Quorum - The current quorum of strategies and weights
-    function quorum() external view returns (Quorum memory) {
-        return _quorum;
+    /// @return quorum - The current quorum of assets and weights
+    function quorum() public view returns (Quorum memory quorum) {
+        quorum.assets = new AssetParams[](_assetToWeightMap[_quorumIndex].length());
+        for (uint256 i = 0; i < quorum.assets.length; i++) {
+            uint256 weight;
+            (quorum.assets[i].asset, weight) = _assetToWeightMap[_quorumIndex].at(i);
+            quorum.assets[i].weight = uint96(weight);
+        }
+        return quorum;
     }
 
     /**
@@ -220,41 +217,29 @@ contract ECDSAStakeRegistry is
     /// @notice Retrieves the threshold weight at a specific block number.
     /// @param _blockNumber The block number to get the threshold weight for the quorum
     /// @return uint256 - The threshold weight the given block.
-    function getLastCheckpointThresholdWeightAtBlock(
-        uint32 _blockNumber
-    ) external view returns (uint256) {
+    function getLastCheckpointThresholdWeightAtBlock(uint32 _blockNumber) external view returns (uint256) {
         return _thresholdWeightHistory.getAtBlock(_blockNumber);
     }
 
-    function operatorRegistered(
-        address _operator
-    ) external view returns (bool) {
+    function operatorRegistered(address _operator) external view returns (bool) {
         return _operatorRegistered[_operator];
     }
 
-    /// @notice Returns the weight an operator must have to contribute to validating an AVS
+    /// @notice Returns the weight an operator must have to contribute to validating an DSS
     function minimumWeight() external view returns (uint256) {
         return _minimumWeight;
     }
 
-    /// @notice Calculates the current weight of an operator based on their delegated stake in the strategies considered in the quorum
+    /// @notice Calculates the current weight of an operator based on their delegated stake in the vaults having assets considered in the quorum
     /// @param _operator The address of the operator.
     /// @return uint256 - The current weight of the operator; returns 0 if below the threshold.
-    function getOperatorWeight(
-        address _operator
-    ) public view returns (uint256) {
-        StrategyParams[] memory strategyParams = _quorum.strategies;
+    function getOperatorWeight(address _operator) public view returns (uint256) {
         uint256 weight;
-        IStrategy[] memory strategies = new IStrategy[](strategyParams.length);
-        for (uint256 i; i < strategyParams.length; i++) {
-            strategies[i] = strategyParams[i].strategy;
-        }
-        uint256[] memory shares = DELEGATION_MANAGER.getOperatorShares(
-            _operator,
-            strategies
-        );
-        for (uint256 i; i < strategyParams.length; i++) {
-            weight += shares[i] * strategyParams[i].multiplier;
+        // Includes vaults queued for exit too. Need to removed vaults queued for unstaking
+        address[] memory vaults = CORE.fetchVaultsStakedInDSS(_operator, _serviceManager);
+        for (uint256 i; i < vaults.length; i++) {
+            //instead of `totalAssets()` need to fetch assets not queued for withdrawals
+            weight += IKarakBaseVault(vaults[i]).totalAssets() * getAssetWeight(IKarakBaseVault(vaults[i]).asset());
         }
         weight = weight / BPS;
 
@@ -265,44 +250,27 @@ contract ECDSAStakeRegistry is
         }
     }
 
+    function getAssetWeight(address asset) public view returns (uint256 weight) {
+        (, weight) = _assetToWeightMap[_quorumIndex].tryGet(asset);
+    }
+
     /// @notice Initializes state for the StakeRegistry
-    /// @param _serviceManagerAddr The AVS' ServiceManager contract's address
-    function __ECDSAStakeRegistry_init(
-        address _serviceManagerAddr,
-        uint256 _thresholdWeight,
-        Quorum memory _quorum
-    ) internal onlyInitializing {
+    /// @param _serviceManagerAddr The DSS' ServiceManager contract's address
+    function __ECDSAStakeRegistry_init(address _serviceManagerAddr, uint256 _thresholdWeight, Quorum memory _quorum)
+        internal
+        onlyInitializing
+    {
         _serviceManager = _serviceManagerAddr;
         _updateStakeThreshold(_thresholdWeight);
         _updateQuorumConfig(_quorum);
         __Ownable_init();
     }
 
-    /// @notice Updates the set of operators for the first quorum.
-    /// @param operatorsPerQuorum An array of operator address arrays, one for each quorum.
-    /// @dev This interface maintains compatibility with avs-sync which handles multiquorums while this registry has a single quorum
-    function updateOperatorsForQuorum(
-        address[][] memory operatorsPerQuorum,
-        bytes memory
-    ) external {
-        _updateAllOperators(operatorsPerQuorum[0]);
-    }
-
-    /// @dev Updates the list of operators if the provided list has the correct number of operators.
-    /// Reverts if the provided list of operators does not match the expected total count of operators.
-    /// @param _operators The list of operator addresses to update.
-    function _updateAllOperators(address[] memory _operators) internal {
-        if (_operators.length != _totalOperators) {
-            revert MustUpdateAllOperators();
-        }
-        _updateOperators(_operators);
-    }
-
     /// @dev Updates the weights for a given list of operator addresses.
     /// When passing an operator that isn't registered, then 0 is added to their history
     /// @param _operators An array of addresses for which to update the weights.
     function _updateOperators(address[] memory _operators) internal {
-        int256 delta;
+        int256 delta = 0;
         for (uint256 i; i < _operators.length; i++) {
             delta += _updateOperatorWeight(_operators[i]);
         }
@@ -333,17 +301,18 @@ contract ECDSAStakeRegistry is
         if (!_isValidQuorum(_newQuorum)) {
             revert InvalidQuorum();
         }
-        Quorum memory oldQuorum = _quorum;
-        delete _quorum;
-        for (uint256 i; i < _newQuorum.strategies.length; i++) {
-            _quorum.strategies.push(_newQuorum.strategies[i]);
+        Quorum memory oldQuorum = quorum();
+
+        for (uint256 i; i < _newQuorum.assets.length; i++) {
+            _assetToWeightMap[_quorumIndex].set(_newQuorum.assets[i].asset, _newQuorum.assets[i].weight);
         }
+        _quorumIndex++;
         emit QuorumUpdated(oldQuorum, _newQuorum);
     }
 
     /// @dev Internal function to deregister an operator
     /// @param _operator The operator's address to deregister
-    function _deregisterOperator(address _operator) internal {
+    function _unregisterOperator(address _operator) internal {
         if (!_operatorRegistered[_operator]) {
             revert OperatorNotRegistered();
         }
@@ -351,18 +320,12 @@ contract ECDSAStakeRegistry is
         delete _operatorRegistered[_operator];
         int256 delta = _updateOperatorWeight(_operator);
         _updateTotalWeight(delta);
-        IServiceManager(_serviceManager).deregisterOperatorFromAVS(_operator);
         emit OperatorDeregistered(_operator, address(_serviceManager));
     }
 
     /// @dev registers an operator through a provided signature
-    /// @param _operatorSignature Contains the operator's signature, salt, and expiry
     /// @param _signingKey The signing key to add to the operator's history
-    function _registerOperatorWithSig(
-        address _operator,
-        ISignatureUtils.SignatureWithSaltAndExpiry memory _operatorSignature,
-        address _signingKey
-    ) internal virtual {
+    function _registerOperator(address _operator, address _signingKey) internal virtual {
         if (_operatorRegistered[_operator]) {
             revert OperatorAlreadyRegistered();
         }
@@ -371,10 +334,6 @@ contract ECDSAStakeRegistry is
         int256 delta = _updateOperatorWeight(_operator);
         _updateTotalWeight(delta);
         _updateOperatorSigningKey(_operator, _signingKey);
-        IServiceManager(_serviceManager).registerOperatorToAVS(
-            _operator,
-            _operatorSignature
-        );
         emit OperatorRegistered(_operator, _serviceManager);
     }
 
@@ -447,20 +406,18 @@ contract ECDSAStakeRegistry is
      * @param _quorum The quorum configuration to be validated.
      * @return bool True if the quorum configuration is valid, otherwise false.
      */
-    function _isValidQuorum(
-        Quorum memory _quorum
-    ) internal pure returns (bool) {
-        StrategyParams[] memory strategies = _quorum.strategies;
-        address lastStrategy;
-        address currentStrategy;
-        uint256 totalMultiplier;
-        for (uint256 i; i < strategies.length; i++) {
-            currentStrategy = address(strategies[i].strategy);
-            if (lastStrategy >= currentStrategy) revert NotSorted();
-            lastStrategy = currentStrategy;
-            totalMultiplier += strategies[i].multiplier;
+    function _isValidQuorum(Quorum memory _quorum) internal pure returns (bool) {
+        AssetParams[] memory assets = _quorum.assets;
+        address lastAsset;
+        address currentAsset;
+        uint256 totalWeight;
+        for (uint256 i; i < assets.length; i++) {
+            currentAsset = address(assets[i].asset);
+            if (lastAsset >= currentAsset) revert NotSorted();
+            lastAsset = currentAsset;
+            totalWeight += assets[i].weight;
         }
-        if (totalMultiplier != BPS) {
+        if (totalWeight != BPS) {
             return false;
         } else {
             return true;
@@ -622,5 +579,13 @@ contract ECDSAStakeRegistry is
         if (thresholdStake > _signedWeight) {
             revert InsufficientSignedStake();
         }
+    }
+
+    /**
+     * =========MODIFIER=========
+     */
+    modifier onlyServiceManager() {
+        if (msg.sender != _serviceManager) revert CallerNotServiceManager();
+        _;
     }
 }

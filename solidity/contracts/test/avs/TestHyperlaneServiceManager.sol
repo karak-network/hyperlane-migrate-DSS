@@ -8,16 +8,12 @@ contract TestHyperlaneServiceManager is HyperlaneServiceManager {
     using EnumerableMapEnrollment for EnumerableMapEnrollment.AddressToEnrollmentMap;
 
     constructor(
-        address _avsDirectory,
         address _stakeRegistry,
-        address _paymentCoordinator,
-        address _delegationManager
+        address _core
     )
         HyperlaneServiceManager(
-            _avsDirectory,
             _stakeRegistry,
-            _paymentCoordinator,
-            _delegationManager
+            _core
         )
     {}
 

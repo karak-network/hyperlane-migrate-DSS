@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.12;
 
-import {IStrategy} from "./IStrategy.sol";
-
-struct StrategyParams {
-    IStrategy strategy; // The strategy contract reference
-    uint96 multiplier; // The multiplier applied to the strategy
+struct AssetParams {
+    address asset; // The asset contract reference
+    uint96 weight; // The weight applied to the asset
 }
 
 struct Quorum {
-    StrategyParams[] strategies; // An array of strategy parameters to define the quorum
+    AssetParams[] assets; // An array of asset parameters to define the quorum
 }
 
 interface IECDSAStakeRegistryEventsAndErrors {
@@ -36,20 +34,13 @@ interface IECDSAStakeRegistryEventsAndErrors {
     /// @notice Emitted when the weight required to be an operator changes
     /// @param oldMinimumWeight The previous weight
     /// @param newMinimumWeight The updated weight
-    event UpdateMinimumWeight(
-        uint256 oldMinimumWeight,
-        uint256 newMinimumWeight
-    );
+    event UpdateMinimumWeight(uint256 oldMinimumWeight, uint256 newMinimumWeight);
 
     /// @notice Emitted when the system updates an operator's weight
     /// @param _operator The address of the operator updated
     /// @param oldWeight The operator's weight before the update
     /// @param newWeight The operator's weight after the update
-    event OperatorWeightUpdated(
-        address indexed _operator,
-        uint256 oldWeight,
-        uint256 newWeight
-    );
+    event OperatorWeightUpdated(address indexed _operator, uint256 oldWeight, uint256 newWeight);
 
     /// @notice Emitted when the system updates the total weight
     /// @param oldTotalWeight The total weight before the update
@@ -65,10 +56,7 @@ interface IECDSAStakeRegistryEventsAndErrors {
     /// @param newSigningKey The operator's signing key after the update
     /// @param oldSigningKey The operator's signing key before the update
     event SigningKeyUpdate(
-        address indexed operator,
-        uint256 indexed updateBlock,
-        address indexed newSigningKey,
-        address oldSigningKey
+        address indexed operator, uint256 indexed updateBlock, address indexed newSigningKey, address oldSigningKey
     );
     /// @notice Indicates when the lengths of the signers array and signatures array do not match.
 
@@ -109,4 +97,7 @@ interface IECDSAStakeRegistryEventsAndErrors {
 
     /// @notice Thrown when de-registering or updating the stake for an unregistered operator
     error OperatorNotRegistered();
+
+    /// @notice Thrown when caller isn't service manager
+    error CallerNotServiceManager();
 }

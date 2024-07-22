@@ -3,14 +3,18 @@ pragma solidity ^0.8.12;
 
 import {IDelegationManager} from "../interfaces/avs/vendored/IDelegationManager.sol";
 import {CheckpointsUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/CheckpointsUpgradeable.sol";
-import {IECDSAStakeRegistryEventsAndErrors, Quorum, StrategyParams} from "../interfaces/avs/vendored/IECDSAStakeRegistryEventsAndErrors.sol";
+import {
+    IECDSAStakeRegistryEventsAndErrors,
+    Quorum,
+    AssetParams
+} from "../interfaces/avs/vendored/IECDSAStakeRegistryEventsAndErrors.sol";
+import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
+import {ICore} from "../interfaces/avs/vendored/ICore.sol";
 
 /// @author Layr Labs, Inc.
-abstract contract ECDSAStakeRegistryStorage is
-    IECDSAStakeRegistryEventsAndErrors
-{
-    /// @notice Manages staking delegations through the DelegationManager interface
-    IDelegationManager internal immutable DELEGATION_MANAGER;
+abstract contract ECDSAStakeRegistryStorage is IECDSAStakeRegistryEventsAndErrors {
+    /// @notice Manages staking through core interface
+    ICore internal immutable CORE;
 
     /// @dev The total amount of multipliers to weigh stakes
     uint256 internal constant BPS = 10_000;
@@ -18,8 +22,11 @@ abstract contract ECDSAStakeRegistryStorage is
     /// @notice The size of the current operator set
     uint256 internal _totalOperators;
 
+    /// @notice Stores the latest quorum index
+    uint256 internal _quorumIndex;
+
     /// @notice Stores the current quorum configuration
-    Quorum internal _quorum;
+    mapping(uint256 quorumIndex => EnumerableMap.AddressToUintMap assetToWeightMap) _assetToWeightMap;
 
     /// @notice Specifies the weight required to become an operator
     uint256 internal _minimumWeight;
@@ -31,8 +38,7 @@ abstract contract ECDSAStakeRegistryStorage is
     uint256 internal _stakeExpiry;
 
     /// @notice Maps an operator to their signing key history using checkpoints
-    mapping(address => CheckpointsUpgradeable.History)
-        internal _operatorSigningKeyHistory;
+    mapping(address => CheckpointsUpgradeable.History) internal _operatorSigningKeyHistory;
 
     /// @notice Tracks the total stake history over time using checkpoints
     CheckpointsUpgradeable.History internal _totalWeightHistory;
@@ -41,15 +47,14 @@ abstract contract ECDSAStakeRegistryStorage is
     CheckpointsUpgradeable.History internal _thresholdWeightHistory;
 
     /// @notice Maps operator addresses to their respective stake histories using checkpoints
-    mapping(address => CheckpointsUpgradeable.History)
-        internal _operatorWeightHistory;
+    mapping(address => CheckpointsUpgradeable.History) internal _operatorWeightHistory;
 
     /// @notice Maps an operator to their registration status
     mapping(address => bool) internal _operatorRegistered;
 
-    /// @param _delegationManager Connects this registry with the DelegationManager
-    constructor(IDelegationManager _delegationManager) {
-        DELEGATION_MANAGER = _delegationManager;
+    /// @param _core Connects this registry with the DelegationManager
+    constructor(ICore _core) {
+        CORE = _core;
     }
 
     // slither-disable-next-line shadowing-state
