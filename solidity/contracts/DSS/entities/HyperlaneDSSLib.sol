@@ -46,17 +46,23 @@ library HyperlaneDSSLib {
         uint256 minimumWeight;
     }
 
-    function init(Storage storage self, address _core, uint256 _minWieight) internal {
+    function init(
+        Storage storage self,
+        address _core,
+        uint256 _minWieight,
+        Quorum memory _quorum
+    ) internal {
         self.core = ICore(_core);
         self.minimumWeight = _minWieight;
         self.quorumIndex = 0;
         self.totalOperators = 0;
+        updateQuorumConfig(self, _quorum);
     }
 
-    function updateTotalWeight(Storage storage self, int256 delta)
-        internal
-        returns (uint256 oldTotalWeight, uint256 newTotalWeight)
-    {
+    function updateTotalWeight(
+        Storage storage self,
+        int256 delta
+    ) internal returns (uint256 oldTotalWeight, uint256 newTotalWeight) {
         oldTotalWeight = self.totalWeightHistory.latest();
         int256 newWeight = int256(oldTotalWeight) + delta;
         newTotalWeight = uint256(newWeight);
@@ -64,7 +70,9 @@ library HyperlaneDSSLib {
         emit TotalWeightUpdated(oldTotalWeight, newTotalWeight);
     }
 
-    function validateQuorum(Quorum memory _quorum) internal pure returns (bool) {
+    function validateQuorum(
+        Quorum memory _quorum
+    ) internal pure returns (bool) {
         AssetParams[] memory assets = _quorum.assets;
         address lastAsset;
         address currentAsset;
@@ -82,63 +90,85 @@ library HyperlaneDSSLib {
         }
     }
 
-    function updateQuorumConfig(Storage storage self, Quorum memory newQuorum) internal {
+    function updateQuorumConfig(
+        Storage storage self,
+        Quorum memory newQuorum
+    ) internal {
         if (!validateQuorum(newQuorum)) revert InvalidQuorum();
         Quorum memory oldQuorum = getQuorum(self);
 
         self.quorumIndex++;
         for (uint256 i; i < newQuorum.assets.length; i++) {
-            self.assetToWeightMap[self.quorumIndex].set(newQuorum.assets[i].asset, newQuorum.assets[i].weight);
+            self.assetToWeightMap[self.quorumIndex].set(
+                newQuorum.assets[i].asset,
+                newQuorum.assets[i].weight
+            );
         }
         emit QuorumUpdated(oldQuorum, newQuorum);
     }
 
-    function updateStakeThreshold(Storage storage self, uint256 thresholdWeight) internal {
+    function updateStakeThreshold(
+        Storage storage self,
+        uint256 thresholdWeight
+    ) internal {
         self.thresholdWeightHistory.push(thresholdWeight);
         emit ThresholdWeightUpdated(thresholdWeight);
     }
 
-    function updateMinimumWeight(Storage storage self, uint256 newMinimumWeight) internal {
+    function updateMinimumWeight(
+        Storage storage self,
+        uint256 newMinimumWeight
+    ) internal {
         uint256 oldMinimumWeight = self.minimumWeight;
         self.minimumWeight = newMinimumWeight;
         emit MinimumWeightUpdated(oldMinimumWeight, newMinimumWeight);
     }
 
-    function getQuorum(Storage storage self) internal view returns (Quorum memory quorum) {
-        quorum.assets = new AssetParams[](self.assetToWeightMap[self.quorumIndex].length());
+    function getQuorum(
+        Storage storage self
+    ) internal view returns (Quorum memory quorum) {
+        quorum.assets = new AssetParams[](
+            self.assetToWeightMap[self.quorumIndex].length()
+        );
         for (uint256 i = 0; i < quorum.assets.length; i++) {
             uint256 weight;
-            (quorum.assets[i].asset, weight) = self.assetToWeightMap[self.quorumIndex].at(i);
+            (quorum.assets[i].asset, weight) = self
+                .assetToWeightMap[self.quorumIndex]
+                .at(i);
             quorum.assets[i].weight = uint96(weight);
         }
         return quorum;
     }
 
-    function getLastCheckpointTotalWeight(Storage storage self) internal view returns (uint256) {
+    function getLastCheckpointTotalWeight(
+        Storage storage self
+    ) internal view returns (uint256) {
         return self.totalWeightHistory.latest();
     }
 
-    function getLastCheckpointThresholdWeight(Storage storage self) internal view returns (uint256) {
+    function getLastCheckpointThresholdWeight(
+        Storage storage self
+    ) internal view returns (uint256) {
         return self.thresholdWeightHistory.latest();
     }
 
-    function getLastCheckpointTotalWeightAtBlock(Storage storage self, uint32 blockNumber)
-        internal
-        view
-        returns (uint256)
-    {
+    function getLastCheckpointTotalWeightAtBlock(
+        Storage storage self,
+        uint32 blockNumber
+    ) internal view returns (uint256) {
         return self.totalWeightHistory.getAtBlock(blockNumber);
     }
 
-    function getLastCheckpointThresholdWeightAtBlock(Storage storage self, uint32 blockNumber)
-        internal
-        view
-        returns (uint256)
-    {
+    function getLastCheckpointThresholdWeightAtBlock(
+        Storage storage self,
+        uint32 blockNumber
+    ) internal view returns (uint256) {
         return self.thresholdWeightHistory.getAtBlock(blockNumber);
     }
 
-    function getRestakeableAssets(Storage storage self) internal view returns (address[] memory) {
+    function getRestakeableAssets(
+        Storage storage self
+    ) internal view returns (address[] memory) {
         return self.assetToWeightMap[self.quorumIndex].keys();
     }
 
@@ -154,22 +184,40 @@ library HyperlaneDSSLib {
 
         for (uint256 i; i < operators.length; i++) {
             if (lastOperator >= operators[i]) revert NotSorted();
-            self.isValidSignature(operators[i], dataHash, signatures[i], referenceBlock);
+            self.isValidSignature(
+                operators[i],
+                dataHash,
+                signatures[i],
+                referenceBlock
+            );
 
             lastOperator = operators[i];
-            uint256 operatorWeight = self.getOperatorWeightAtBlock(operators[i], referenceBlock);
+            uint256 operatorWeight = self.getOperatorWeightAtBlock(
+                operators[i],
+                referenceBlock
+            );
             signedWeight += operatorWeight;
         }
 
         validateThresholdStake(self, signedWeight, referenceBlock);
     }
 
-    function validateThresholdStake(Storage storage self, uint256 signedWeight, uint32 referenceBlock) internal view {
-        uint256 totalWeight = getLastCheckpointTotalWeightAtBlock(self, referenceBlock);
+    function validateThresholdStake(
+        Storage storage self,
+        uint256 signedWeight,
+        uint32 referenceBlock
+    ) internal view {
+        uint256 totalWeight = getLastCheckpointTotalWeightAtBlock(
+            self,
+            referenceBlock
+        );
         if (signedWeight > totalWeight) {
             revert InvalidSignedWeight();
         }
-        uint256 thresholdStake = getLastCheckpointThresholdWeightAtBlock(self, referenceBlock);
+        uint256 thresholdStake = getLastCheckpointThresholdWeightAtBlock(
+            self,
+            referenceBlock
+        );
         if (thresholdStake > signedWeight) {
             revert InsufficientSignedStake();
         }

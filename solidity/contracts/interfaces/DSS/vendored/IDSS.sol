@@ -19,8 +19,11 @@ interface IDSS is IERC165 {
 
     // HOOKS
 
-    function registrationHook(address operator, bytes memory extraData) external;
-    function unregistrationHook(address operator, bytes memory extraData) external;
+    function registrationHook(
+        address operator,
+        bytes memory extraData
+    ) external;
+    function unregistrationHook(address operator) external;
 
     error CallerNotCore();
 }
