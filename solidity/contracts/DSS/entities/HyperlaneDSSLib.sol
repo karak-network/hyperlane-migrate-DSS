@@ -49,11 +49,11 @@ library HyperlaneDSSLib {
     function init(
         Storage storage self,
         address _core,
-        uint256 _minWieight,
+        uint256 _minWeight,
         Quorum memory _quorum
     ) internal {
         self.core = ICore(_core);
-        self.minimumWeight = _minWieight;
+        self.minimumWeight = _minWeight;
         self.quorumIndex = 0;
         self.totalOperators = 0;
         updateQuorumConfig(self, _quorum);

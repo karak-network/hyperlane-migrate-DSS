@@ -110,14 +110,14 @@ contract DeployHyperlaneDSS is Script {
             quorum
         );
         vm.stopBroadcast();
-        console2.log("sucessfully initialized hyperlaneDSS");
+        console2.log("successfully initialized hyperlaneDSS");
     }
 
     function registerHyperlaneDSS() public {
         vm.startBroadcast(hyperlaneDSSOwner);
         hyperlaneDSS.registerToCore(maxSlashablePercentageWad);
         vm.stopBroadcast();
-        console2.log("sucessfully registered hyperlaneDSS with core");
+        console2.log("successfully registered hyperlaneDSS with core");
     }
 
     function deploy(string memory network) external {
