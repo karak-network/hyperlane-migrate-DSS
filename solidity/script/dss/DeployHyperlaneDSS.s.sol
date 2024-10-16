@@ -7,7 +7,7 @@ import {ProxyAdmin} from "../../contracts/upgrade/ProxyAdmin.sol";
 import {TransparentUpgradeableProxy, ITransparentUpgradeableProxy} from "../../contracts/upgrade/TransparentUpgradeableProxy.sol";
 
 import {HyperlaneDSS, HyperlaneDSSLib} from "../../contracts/DSS/HyperlaneDSS.sol";
-import {Constants} from "../../contracts/DSS/entities/Constants.sol";
+import {HyperlaneDSSConstants} from "../../contracts/DSS/entities/Constants.sol";
 
 contract DeployHyperlaneDSS is Script {
     using stdJson for string;
@@ -16,8 +16,8 @@ contract DeployHyperlaneDSS is Script {
     address coreAddress;
     uint256 minimumWeight;
     uint256 maxSlashablePercentageWad;
-    address DEPLOYER = 0x54603E6fd3A92E32Bd3c00399D306B82bB3601Ba;
-    address PROXY_ADMIN_OWNER = 0x54603E6fd3A92E32Bd3c00399D306B82bB3601Ba;
+    address DEPLOYER = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+    address PROXY_ADMIN_OWNER = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
 
     HyperlaneDSSLib.Quorum quorum;
     ProxyAdmin proxyAdmin;
@@ -59,7 +59,10 @@ contract DeployHyperlaneDSS is Script {
             weightSum += assets[i].weight;
             quorum.assets.push(assets[i]);
         }
-        require(weightSum == Constants.BPS, "Invalid sum of asset weights");
+        require(
+            weightSum == HyperlaneDSSConstants.BPS,
+            "Invalid sum of asset weights"
+        );
     }
 
     function deployProxyAdmin() public {
@@ -107,17 +110,11 @@ contract DeployHyperlaneDSS is Script {
             hyperlaneDSSOwner,
             coreAddress,
             minimumWeight,
+            maxSlashablePercentageWad,
             quorum
         );
         vm.stopBroadcast();
         console2.log("successfully initialized hyperlaneDSS");
-    }
-
-    function registerHyperlaneDSS() public {
-        vm.startBroadcast(hyperlaneDSSOwner);
-        hyperlaneDSS.registerToCore(maxSlashablePercentageWad);
-        vm.stopBroadcast();
-        console2.log("successfully registered hyperlaneDSS with core");
     }
 
     function deploy(string memory network) external {
@@ -125,6 +122,5 @@ contract DeployHyperlaneDSS is Script {
         deployProxyAdmin();
         deployHyperlaneDSSAsTransparentProxy();
         initializeHyperlaneDSS(network);
-        registerHyperlaneDSS();
     }
 }
