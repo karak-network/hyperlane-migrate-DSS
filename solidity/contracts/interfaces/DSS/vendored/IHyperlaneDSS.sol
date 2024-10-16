@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: SEE LICENSE IN LICENSE
+pragma solidity ^0.8;
 import {Enrollment} from "../../../libs/EnumerableMapEnrollment.sol";
 import {IRemoteChallenger} from "../IRemoteChallenger.sol";
 import {HyperlaneDSSLib} from "../../../DSS/entities/HyperlaneDSSLib.sol";
-import {IDSS} from "./IDSS.sol";
+import {IBaseDSS} from "karak-onchain-sdk/src/interfaces/IBaseDSS.sol";
 
-interface IHyperlaneDSS is IDSS {
+interface IHyperlaneDSS is IBaseDSS {
     // ============ Mutative Functions ============
 
     function initialize(
         address _owner,
         address _core,
         uint256 _minWeight,
+        uint256 _maxSlashablePerecentageWad,
         HyperlaneDSSLib.Quorum memory _quorum
     ) external;
-
-    function registerToCore(uint256 maxSlashablePercentageWad) external;
 
     function enrollIntoChallengers(
         IRemoteChallenger[] memory challengers
@@ -102,10 +102,4 @@ interface IHyperlaneDSS is IDSS {
     function getOperatorRestakedVaults(
         address operator
     ) external view returns (address[] memory);
-
-    function isOperatorJailed(address operator) external view returns (bool);
-
-    function supportsInterface(
-        bytes4 interfaceId
-    ) external view override returns (bool);
 }

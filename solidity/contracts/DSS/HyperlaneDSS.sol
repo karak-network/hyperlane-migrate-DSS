@@ -15,24 +15,28 @@ pragma solidity >=0.8.0;
 
 // ============ Internal Imports ============
 import {IERC1271Upgradeable} from "@openzeppelin/contracts-upgradeable/interfaces/IERC1271Upgradeable.sol";
+import {BaseDSSLib} from "karak-onchain-sdk/src/entities/BaseDSSLib.sol";
+import {BaseDSS} from "karak-onchain-sdk/src/BaseDSS.sol";
 
 import {Enrollment, EnrollmentStatus} from "../libs/EnumerableMapEnrollment.sol";
 import {HyperlaneDSSLib} from "./entities/HyperlaneDSSLib.sol";
-import {OperatorLib} from "./entities/OperatorLib.sol";
+import {OperatorStateLib} from "./entities/OperatorLib.sol";
 
-import {IHyperlaneDSS, IDSS} from "../interfaces/DSS/vendored/IHyperlaneDSS.sol";
+import {IHyperlaneDSS, IBaseDSS} from "../interfaces/DSS/vendored/IHyperlaneDSS.sol";
 import {IRemoteChallenger} from "../interfaces/DSS/IRemoteChallenger.sol";
 import {ICore} from "../interfaces/DSS/vendored/ICore.sol";
 import "../interfaces/DSS/vendored/Events.sol";
 import "../interfaces/DSS/vendored/Errors.sol";
+import "./entities/Constants.sol";
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
-contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable {
+contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable, BaseDSS {
     // ============ Libraries ============
 
     using HyperlaneDSSLib for HyperlaneDSSLib.Storage;
-    using OperatorLib for HyperlaneDSSLib.Storage;
+    using OperatorStateLib for HyperlaneDSSLib.Storage;
+    using BaseDSSLib for BaseDSSLib.State;
 
     // keccak256(abi.encode(uint256(keccak256("hyperlanedss.storage")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 internal constant STORAGE_SLOT =
@@ -47,25 +51,18 @@ contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable {
     // ============ Mutative Functions ============
     /**
      * @notice Initializes the HyperlaneDSS contract with the owner address, minimum weight
+     * @notice Registers the HyperlaneDSS with core with given `_maxSlashablePerecentageWad`.
      */
     function initialize(
         address _owner,
         address _core,
         uint256 _minWeight,
+        uint256 _maxSlashablePerecentageWad,
         HyperlaneDSSLib.Quorum memory _quorum
     ) external initializer {
         _transferOwnership(_owner);
-        _self().init(_core, _minWeight, _quorum);
-    }
-
-    /**
-     * @notice Registers the HyperlaneDSS with core.
-     * @param maxSlashablePerecentageWad maximum slashable percentage wad that can be requested by DSS in each request.
-     */
-    function registerToCore(
-        uint256 maxSlashablePerecentageWad
-    ) external onlyOwner {
-        ICore(_self().core).registerDSS(maxSlashablePerecentageWad);
+        _self().init(_minWeight, _quorum);
+        _init(_core, _maxSlashablePerecentageWad);
     }
 
     /**
@@ -106,7 +103,7 @@ contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable {
     function jailOperator(
         address operator
     ) external virtual onlyEnrolledChallenger(operator) {
-        _self().jailOperator(operator);
+        _jailOperator(operator);
     }
 
     /**
@@ -117,8 +114,9 @@ contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable {
     function registrationHook(
         address operator,
         bytes memory extraData
-    ) external onlyCore {
+    ) public override(BaseDSS, IHyperlaneDSS) onlyCore {
         _self().registerOperator(operator, extraData);
+        super.registrationHook(operator, "");
     }
 
     /**
@@ -127,11 +125,14 @@ contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable {
      * @dev Operator is unenrolled from all the challengers as `Challenger` had enough time to slash any operator during unstaking delay.
      * @param operator address of the operator.
      */
-    function unregistrationHook(address operator) external onlyCore {
+    function unregistrationHook(
+        address operator
+    ) public override(BaseDSS, IHyperlaneDSS) onlyCore {
         HyperlaneDSSLib.Storage storage self = _self();
         address[] memory challengers = self.getOperatorChallengers(operator);
         self.completeUnenrollment(challengers, operator, false);
         self.unregisterOperator(operator);
+        super.unregistrationHook(operator);
     }
 
     /**
@@ -154,7 +155,7 @@ contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable {
         HyperlaneDSSLib.Storage storage self = _self();
         int256 delta = 0;
         for (uint256 i = 0; i < operators.length; i++) {
-            if (!self.isOperatorRegistered(operators[i])) {
+            if (!isOperatorRegistered(operators[i])) {
                 revert OperatorNotRegistered();
             }
             delta += self.updateOperatorWeight(operators[i]);
@@ -350,28 +351,27 @@ contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable {
         return _self().getOperatorRestakedVaults(operator);
     }
 
-    function isOperatorJailed(address operator) public view returns (bool) {
-        return _self().isJailed(operator);
-    }
-
-    function supportsInterface(
-        bytes4 interfaceId
-    ) external view override returns (bool) {
-        if (
-            interfaceId == IDSS.registrationHook.selector ||
-            interfaceId == IDSS.unregistrationHook.selector
-        ) {
-            return true;
-        }
-        return false;
-    }
-
     // ============ Internal Functions ============
 
+    /**
+     * @return $ pointer to `HyperlaneDSSLib` Storage
+     */
     function _self() internal pure returns (HyperlaneDSSLib.Storage storage $) {
         assembly {
             $.slot := STORAGE_SLOT
         }
+    }
+
+    /**
+     * @return pointer to `BaseDSSLib` State
+     */
+    function baseDssStatePtr()
+        internal
+        view
+        override
+        returns (BaseDSSLib.State storage)
+    {
+        return _self().baseDssState;
     }
 
     // ============ Modifiers ============
@@ -389,13 +389,8 @@ contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable {
         _;
     }
 
-    modifier onlyCore() {
-        if (msg.sender != address(_self().core)) revert CallerNotCore();
-        _;
-    }
-
     modifier onlyRegisteredOperator(address operator) {
-        if (!_self().isOperatorRegistered(operator)) {
+        if (!isOperatorRegistered(operator)) {
             revert OperatorNotRegistered();
         }
         _;

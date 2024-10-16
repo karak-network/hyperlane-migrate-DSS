@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: SEE LICENSE IN LICENSE
 pragma solidity ^0.8.22;
 
-import {IDSS} from "./IDSS.sol";
+import {IBaseDSS} from "karak-onchain-sdk/src/interfaces/IBaseDSS.sol";
 
 interface ICore {
     function registerDSS(uint256 maxSlashablePercentageWad) external;
     function registerOperatorToDSS(
-        IDSS dss,
+        IBaseDSS dss,
         bytes memory registrationHookData
     ) external;
-    function unregisterOperatorFromDSS(IDSS dss) external;
+    function unregisterOperatorFromDSS(IBaseDSS dss) external;
+
+    function requestUpdateVaultStakeInDSS(
+        IBaseDSS.StakeUpdateRequest memory newStake
+    ) external returns (IBaseDSS.QueuedStakeUpdate memory);
+    function finalizeUpdateVaultStakeInDSS(
+        IBaseDSS.QueuedStakeUpdate memory newQueuedStake
+    ) external;
 
     /* ============ VIEW FUNCTIONS ============ */
     function getOperatorVaults(
@@ -24,7 +31,7 @@ interface ICore {
     ) external view returns (bytes32[] memory res);
     function isOperatorRegisteredToDSS(
         address operator,
-        IDSS dss
+        IBaseDSS dss
     ) external view returns (bool);
     /* ======================================== */
 }

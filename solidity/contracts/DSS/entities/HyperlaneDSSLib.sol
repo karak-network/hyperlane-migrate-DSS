@@ -3,20 +3,21 @@ pragma solidity ^0.8.22;
 
 import {CheckpointsUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/CheckpointsUpgradeable.sol";
 import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
-
+import {BaseDSSLib} from "karak-onchain-sdk/src/entities/BaseDSSLib.sol";
 import {Enrollment, EnrollmentStatus, EnumerableMapEnrollment} from "../../libs/EnumerableMapEnrollment.sol";
-import {OperatorLib} from "./OperatorLib.sol";
-import {Constants} from "./Constants.sol";
+import {OperatorStateLib} from "./OperatorLib.sol";
+import {HyperlaneDSSConstants} from "./Constants.sol";
 
 import "../../interfaces/DSS/vendored/ICore.sol";
 import "../../interfaces/DSS/vendored/Events.sol";
 import "../../interfaces/DSS/vendored/Errors.sol";
 
 library HyperlaneDSSLib {
-    using OperatorLib for OperatorLib.State;
-    using OperatorLib for HyperlaneDSSLib.Storage;
+    using OperatorStateLib for OperatorStateLib.State;
+    using OperatorStateLib for HyperlaneDSSLib.Storage;
     using EnumerableMap for EnumerableMap.AddressToUintMap;
     using CheckpointsUpgradeable for CheckpointsUpgradeable.History;
+    using BaseDSSLib for BaseDSSLib.State;
 
     struct AssetParams {
         address asset; // The asset contract reference
@@ -29,7 +30,7 @@ library HyperlaneDSSLib {
 
     struct Storage {
         // Mapping of operators to challengers they are enrolled in
-        mapping(address operator => OperatorLib.State state) operatorState;
+        mapping(address operator => OperatorStateLib.State state) operatorState;
         /// @notice Stores the latest quorum index
         uint256 quorumIndex;
         /// @notice Stores the current quorum configuration
@@ -38,24 +39,19 @@ library HyperlaneDSSLib {
         CheckpointsUpgradeable.History totalWeightHistory;
         /// @notice Tracks the threshold bps history using checkpoints
         CheckpointsUpgradeable.History thresholdWeightHistory;
-        /// @dev address of the core
-        ICore core;
-        /// @notice The size of the current operator set
-        uint96 totalOperators;
         /// @notice Specifies the weight required to become an operator
         uint256 minimumWeight;
+        /// @notice Storage for BaseDSS `State`
+        BaseDSSLib.State baseDssState;
     }
 
     function init(
         Storage storage self,
-        address _core,
         uint256 _minWeight,
         Quorum memory _quorum
     ) internal {
-        self.core = ICore(_core);
         self.minimumWeight = _minWeight;
         self.quorumIndex = 0;
-        self.totalOperators = 0;
         updateQuorumConfig(self, _quorum);
     }
 
@@ -83,7 +79,7 @@ library HyperlaneDSSLib {
             lastAsset = currentAsset;
             totalWeight += assets[i].weight;
         }
-        if (totalWeight != Constants.BPS) {
+        if (totalWeight != HyperlaneDSSConstants.BPS) {
             return false;
         } else {
             return true;

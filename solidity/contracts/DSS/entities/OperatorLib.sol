@@ -5,15 +5,19 @@ import {CheckpointsUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/
 import {Enrollment, EnrollmentStatus, EnumerableMapEnrollment} from "../../libs/EnumerableMapEnrollment.sol";
 import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import {SignatureCheckerUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/SignatureCheckerUpgradeable.sol";
+import {IERC20} from "forge-std/interfaces/IERC20.sol";
+import {IERC4626} from "forge-std/interfaces/IERC4626.sol";
 
-import {Constants} from "./Constants.sol";
+import {HyperlaneDSSConstants} from "./Constants.sol";
 import {HyperlaneDSSLib} from "./HyperlaneDSSLib.sol";
+import {BaseDSSOperatorLib} from "karak-onchain-sdk/src/entities/BaseDssOperatorlib.sol";
+import {IBaseDSS} from "karak-onchain-sdk/src/interfaces/IBaseDSS.sol";
 
 import "../../interfaces/DSS/vendored/Events.sol";
 import "../../interfaces/DSS/vendored/Errors.sol";
 import {IKarakBaseVault} from "../../interfaces/DSS/vendored/IKarakBaseVault.sol";
 
-library OperatorLib {
+library OperatorStateLib {
     using HyperlaneDSSLib for HyperlaneDSSLib.Storage;
     using EnumerableMapEnrollment for EnumerableMapEnrollment.AddressToEnrollmentMap;
     using CheckpointsUpgradeable for CheckpointsUpgradeable.History;
@@ -27,9 +31,6 @@ library OperatorLib {
         CheckpointsUpgradeable.History operatorSigningKeyHistory;
         /// @notice Maps operator addresses to their respective stake histories using checkpoints
         CheckpointsUpgradeable.History operatorWeightHistory;
-        /// @notice Maps an operator to their registration status
-        bool isRegistered;
-        bool isJailed;
     }
 
     function registerOperator(
@@ -38,9 +39,6 @@ library OperatorLib {
         bytes memory data
     ) internal {
         address signingKey = abi.decode(data, (address));
-        State storage operatorState = self.operatorState[operator];
-        operatorState.isRegistered = true;
-        self.totalOperators++;
         int256 delta = updateOperatorWeight(self, operator);
         self.updateTotalWeight(delta);
         updateOperatorSigningKey(self, operator, signingKey);
@@ -50,10 +48,6 @@ library OperatorLib {
         HyperlaneDSSLib.Storage storage self,
         address operator
     ) internal {
-        State storage operatorState = self.operatorState[operator];
-        if (!operatorState.isRegistered) revert OperatorNotRegistered();
-        self.totalOperators--;
-        operatorState.isRegistered = false;
         int256 delta = updateOperatorWeight(self, operator);
         self.updateTotalWeight(delta);
     }
@@ -98,8 +92,9 @@ library OperatorLib {
             if (!exists || enrollment.status == EnrollmentStatus.UNENROLLED) {
                 revert OperatorNotEnrolledWithChallenger(challengers[i]);
             }
-            if (enrollment.status == EnrollmentStatus.PENDING_UNENROLLMENT)
+            if (enrollment.status == EnrollmentStatus.PENDING_UNENROLLMENT) {
                 break;
+            }
 
             operatorState.enrolledChallengers.set(
                 address(challengers[i]),
@@ -119,9 +114,8 @@ library OperatorLib {
 
     function validateUnenrollment(
         State storage self,
-        IRemoteChallenger challenger,
-        address operator
-    ) internal returns (bool) {
+        IRemoteChallenger challenger
+    ) internal view {
         (bool exists, Enrollment memory enrollment) = self
             .enrolledChallengers
             .tryGet(address(challenger));
@@ -148,12 +142,12 @@ library OperatorLib {
     ) internal {
         State storage operatorState = self.operatorState[operator];
         for (uint256 i = 0; i < challengers.length; i++) {
-            if (validate)
+            if (validate) {
                 validateUnenrollment(
                     operatorState,
-                    IRemoteChallenger(challengers[i]),
-                    operator
+                    IRemoteChallenger(challengers[i])
                 );
+            }
             operatorState.enrolledChallengers.remove(address(challengers[i]));
             emit OperatorUnenrolledFromChallenger(
                 operator,
@@ -163,22 +157,17 @@ library OperatorLib {
         }
     }
 
-    function jailOperator(
-        HyperlaneDSSLib.Storage storage self,
-        address operator
-    ) internal {
-        self.operatorState[operator].isJailed = true;
-    }
-
     function updateOperatorWeight(
         HyperlaneDSSLib.Storage storage self,
         address operator
     ) internal returns (int256 delta) {
         State storage operatorState = self.operatorState[operator];
-        int256 delta;
         uint256 newWeight;
         uint256 oldWeight = operatorState.operatorWeightHistory.latest();
-        if (!operatorState.isRegistered) {
+        bool isRegistered = IBaseDSS(address(this)).isOperatorRegistered(
+            operator
+        );
+        if (!isRegistered) {
             delta -= int256(oldWeight);
             if (delta == 0) {
                 return delta;
@@ -219,13 +208,6 @@ library OperatorLib {
         );
     }
 
-    function isOperatorRegistered(
-        HyperlaneDSSLib.Storage storage self,
-        address operator
-    ) internal view returns (bool) {
-        return self.operatorState[operator].isRegistered;
-    }
-
     function getOperatorChallengers(
         HyperlaneDSSLib.Storage storage self,
         address operator
@@ -249,18 +231,20 @@ library OperatorLib {
         address operator
     ) internal view returns (uint256) {
         uint256 weight;
-        // Includes vaults queued for exit too. Need to removed vaults queued for unstaking
-        address[] memory vaults = self.core.fetchVaultsStakedInDSS(
-            operator,
-            address(this)
-        ); // this lib should be internal else this will fail
+        address[] memory vaults = IBaseDSS(address(this)).getActiveVaults(
+            operator
+        );
         for (uint256 i; i < vaults.length; i++) {
-            //instead of `totalAssets()` need to fetch assets not queued for withdrawals
+            uint256 sharesNotQueuedForWithdrawal = IERC20(vaults[i])
+                .totalSupply() - IERC20(vaults[i]).balanceOf(vaults[i]);
+            uint256 assetBalance = IERC4626(vaults[i]).convertToAssets(
+                sharesNotQueuedForWithdrawal
+            );
             weight +=
-                IKarakBaseVault(vaults[i]).totalAssets() *
+                assetBalance *
                 getAssetWeight(self, IKarakBaseVault(vaults[i]).asset());
         }
-        weight = weight / Constants.BPS;
+        weight = weight / HyperlaneDSSConstants.BPS;
 
         if (weight >= self.minimumWeight) {
             return weight;
@@ -337,17 +321,18 @@ library OperatorLib {
             operator,
             blockNumber
         );
-        if (!signer.isValidSignatureNow(dataHash, signature))
+        if (!signer.isValidSignatureNow(dataHash, signature)) {
             revert InvalidSignature();
+        }
     }
 
     function getOperatorRestakedVaults(
         HyperlaneDSSLib.Storage storage self,
         address operator
     ) internal view returns (address[] memory restakedVaults) {
-        address[] memory vaults = self.core.fetchVaultsStakedInDSS(
+        address[] memory vaults = self.baseDssState.core.fetchVaultsStakedInDSS(
             operator,
-            address(this)
+            IBaseDSS(address(this))
         );
 
         uint256 vaultCountWithAssetsInQuorum = 0;
@@ -368,12 +353,5 @@ library OperatorLib {
                 index++;
             }
         }
-    }
-
-    function isJailed(
-        HyperlaneDSSLib.Storage storage self,
-        address operator
-    ) internal view returns (bool) {
-        return self.operatorState[operator].isJailed;
     }
 }
