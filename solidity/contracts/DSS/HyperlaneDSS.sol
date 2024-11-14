@@ -154,8 +154,9 @@ contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable {
         HyperlaneDSSLib.Storage storage self = _self();
         int256 delta = 0;
         for (uint256 i = 0; i < operators.length; i++) {
-            if (!self.isOperatorRegistered(operators[i]))
+            if (!self.isOperatorRegistered(operators[i])) {
                 revert OperatorNotRegistered();
+            }
             delta += self.updateOperatorWeight(operators[i]);
         }
         self.updateTotalWeight(delta);
@@ -394,8 +395,9 @@ contract HyperlaneDSS is IHyperlaneDSS, OwnableUpgradeable {
     }
 
     modifier onlyRegisteredOperator(address operator) {
-        if (!_self().isOperatorRegistered(operator))
+        if (!_self().isOperatorRegistered(operator)) {
             revert OperatorNotRegistered();
+        }
         _;
     }
 }
