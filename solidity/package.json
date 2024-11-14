@@ -9,7 +9,8 @@
     "@layerzerolabs/lz-evm-oapp-v2": "2.0.2",
     "@openzeppelin/contracts": "^4.9.3",
     "@openzeppelin/contracts-upgradeable": "^v4.9.3",
-    "fx-portal": "^1.0.3"
+    "fx-portal": "^1.0.3",
+    "karak-onchain-sdk": "git@github.com:karak-network/karak-onchain-sdk.git#commit=f3a1c280bca15c81485d077dbe4dcaa88fc6a823"
   },
   "devDependencies": {
     "@layerzerolabs/solidity-examples": "^1.1.0",
