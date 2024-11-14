@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 pragma solidity >=0.8.0;
 
-import {IRemoteChallenger} from "../interfaces/DSS/IRemoteChallenger.sol";
-import {HyperlaneDSS} from "../DSS/HyperlaneDSS.sol";
+import {IRemoteChallenger} from "../interfaces/avs/IRemoteChallenger.sol";
+import {HyperlaneServiceManager} from "../avs/HyperlaneServiceManager.sol";
 
 contract TestRemoteChallenger is IRemoteChallenger {
-    HyperlaneDSS internal immutable hDSS;
+    HyperlaneServiceManager internal immutable hsm;
 
-    constructor(HyperlaneDSS _hDSS) {
-        hDSS = _hDSS;
+    constructor(HyperlaneServiceManager _hsm) {
+        hsm = _hsm;
     }
 
     function challengeDelayBlocks() external pure returns (uint256) {
@@ -16,6 +16,6 @@ contract TestRemoteChallenger is IRemoteChallenger {
     }
 
     function handleChallenge(address operator) external {
-        hDSS.jailOperator(operator);
+        hsm.freezeOperator(operator);
     }
 }

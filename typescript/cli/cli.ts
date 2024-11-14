@@ -5,10 +5,10 @@ import yargs from 'yargs';
 import type { LogFormat, LogLevel } from '@hyperlane-xyz/utils';
 
 import './env.js';
+import { avsCommand } from './src/commands/avs.js';
 import { configCommand } from './src/commands/config.js';
 import { coreCommand } from './src/commands/core.js';
 import { deployCommand } from './src/commands/deploy.js';
-import { dssCommand } from './src/commands/dss.js';
 import { hookCommand } from './src/commands/hook.js';
 import { ismCommand } from './src/commands/ism.js';
 import {
@@ -53,7 +53,7 @@ try {
       },
       contextMiddleware,
     ])
-    .command(dssCommand)
+    .command(avsCommand)
     .command(configCommand)
     .command(coreCommand)
     .command(deployCommand)

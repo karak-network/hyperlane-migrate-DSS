@@ -223,9 +223,9 @@ export const operatorKeyPathCommandOption: Options = {
   description: 'Path to the operator key file',
 };
 
-export const dssChainCommandOption: Options = {
+export const avsChainCommandOption: Options = {
   type: 'string',
-  description: 'Chain to interact with the HyperlaneDSS on',
+  description: 'Chain to interact with the AVS on',
   demandOption: true,
   choices: ['holesky', 'ethereum'],
 };
